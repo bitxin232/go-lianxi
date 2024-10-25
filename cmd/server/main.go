@@ -10,6 +10,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"gorm.io/driver/mysql"
 	"gorm.io/gorm"
+	"gorm.io/gorm/logger"
 )
 
 func main() {
@@ -17,10 +18,19 @@ func main() {
 	cfg := config.Load()
 
 	// 连接数据库
-	db, err := gorm.Open(mysql.Open(cfg.DatabaseDSN), &gorm.Config{})
+	db, err := gorm.Open(mysql.Open(cfg.DatabaseDSN), &gorm.Config{
+		Logger: logger.Default.LogMode(logger.Info), // 设置 GORM 日志级别为 Info
+	})
 	if err != nil {
-		log.Fatal("Failed to connect database")
+		log.Fatal("Failed to connect database:", err)
 	}
+
+	// 打印数据库连接信息
+	sqlDB, err := db.DB()
+	if err != nil {
+		log.Fatal("Failed to get database connection:", err)
+	}
+	log.Println("Database connected successfully. Max open connections:", sqlDB.Stats().MaxOpenConnections)
 
 	// 初始化存储库
 	repo := repository.NewBeiDanRepository(db)
@@ -42,5 +52,8 @@ func main() {
 	r.POST("/getData", h.GetData)
 
 	// 运行服务器
-	r.Run(cfg.ServerAddress)
+	log.Println("Server starting on", cfg.ServerAddress)
+	if err := r.Run(cfg.ServerAddress); err != nil {
+		log.Fatal("Failed to start server:", err)
+	}
 }

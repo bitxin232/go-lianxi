@@ -1,36 +1,45 @@
 package main
 
 import (
-	"fmt"
 	"log"
-	"net/http"
 
+	"github.com/bitxin232/beidan/internal/config"
+	"github.com/bitxin232/beidan/internal/handler"
+	"github.com/bitxin232/beidan/internal/repository"
+	"github.com/bitxin232/beidan/internal/service"
 	"github.com/gin-gonic/gin"
 	"gorm.io/driver/mysql"
 	"gorm.io/gorm"
+	"gorm.io/gorm/logger"
 )
 
-type BeiDan struct {
-	ID          uint   `gorm:"primaryKey"`
-	Period      string `gorm:"column:period"`
-	MatchNumber string `gorm:"column:match_number"`
-	Event       string `gorm:"column:event"`
-	Deadline    string `gorm:"column:deadline"`
-	HomeTeam    string `gorm:"column:home_team"`
-	Handicap    string `gorm:"column:handicap"`
-	AwayTeam    string `gorm:"column:away_team"`
-}
-
 func main() {
+	// 加载配置
+	cfg := config.Load()
+
 	// 连接数据库
-	dsn := "root:123@tcp(127.0.0.1:3306)/db1?charset=utf8mb4&parseTime=True&loc=Local"
-	db, err := gorm.Open(mysql.Open(dsn), &gorm.Config{})
+	db, err := gorm.Open(mysql.Open(cfg.DatabaseDSN), &gorm.Config{
+		Logger: logger.Default.LogMode(logger.Info), // 设置 GORM 日志级别为 Info
+	})
 	if err != nil {
-		log.Fatal("数据库连接失败")
+		log.Fatal("Failed to connect database:", err)
 	}
 
-	// 连接数据库是否成功
-	fmt.Println("数据库连接成功")
+	// 打印数据库连接信息
+	sqlDB, err := db.DB()
+	if err != nil {
+		log.Fatal("Failed to get database connection:", err)
+	}
+	log.Println("Database connected successfully. Max open connections:", sqlDB.Stats().MaxOpenConnections)
+
+	// 初始化存储库
+	repo := repository.NewBeiDanRepository(db)
+
+	// 初始化服务
+	svc := service.NewBeiDanService(repo)
+
+	// 初始化处理器
+	h := handler.NewBeiDanHandler(svc)
 
 	// 创建Gin引擎
 	r := gin.Default()
@@ -38,27 +47,13 @@ func main() {
 	// 加载HTML模板
 	r.LoadHTMLGlob("templates/*")
 
-	// 处理首页请求
-	r.GET("/", func(c *gin.Context) {
-		c.HTML(http.StatusOK, "index.html", gin.H{})
-	})
-
-	// 处理获取数据请求
-	r.POST("/getData", func(c *gin.Context) {
-		period := c.PostForm("period")
-
-		var beidans []BeiDan
-		result := db.Where("period = ?", period).Find(&beidans)
-		if result.Error != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch data"})
-			return
-		}
-
-		c.HTML(http.StatusOK, "data.html", gin.H{
-			"beidans": beidans,
-		})
-	})
+	// 设置路由
+	r.GET("/", h.Index)
+	r.POST("/getData", h.GetData)
 
 	// 运行服务器
-	r.Run(":8080")
+	log.Println("Server starting on", cfg.ServerAddress)
+	if err := r.Run(cfg.ServerAddress); err != nil {
+		log.Fatal("Failed to start server:", err)
+	}
 }
